@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Variables (Modify these before running)
+VPC_ID="vpc-abcdefghijklm"
+SUBNET_IDS="subnet-abcdefghijklm subnet-abcdefghijklm" # Add at least two subnets
+REGION="us-east-1"
+
+# If wanting to Use Security Groups with NLB, if not adjust LB_ARN= below and remove --security-groups line
+SECURITY_GROUP_ID="sg-abcdefghijklm"
+
+# Names cannot be over 32 characters
+TG_NAME="acctname-int-web-nlb-tg"
+TG_PORT=25
+TG_PROTOCOL="TCP"  # For NLB, use TCP or UDP
+LB_NAME="wa-shared-int-smtprelay-nlb"
+LB_SCHEME="internal"  # Internal Load Balancer
+LISTENER_PORT=25
+INSTANCE_IDS=("i-0c7a9e72952e84f9d" "i-0d68cbb05ef12526f")  # Replace with your instance IDs
+
+
+# Step 1: Create a Target Group
+TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME \
+  --protocol $TG_PROTOCOL --port $TG_PORT \
+  --vpc-id $VPC_ID --target-type instance \
+  --region $REGION \
+  --query 'TargetGroups[0].TargetGroupArn' --output text)
+
+echo "Created Target Group: $TG_ARN"
+
+# Step 2: Register Targets (EC2 instances) to the Target Group
+for INSTANCE in "${INSTANCE_IDS[@]}"; do
+  aws elbv2 register-targets --target-group-arn $TG_ARN \
+    --region $REGION \
+    --targets Id=$INSTANCE
+  echo "Registered instance $INSTANCE to Target Group"
+done
+
+# Step 3: Create an Internal Network Load Balancer
+LB_ARN=$(aws elbv2 create-load-balancer --name $LB_NAME \
+  --subnets $SUBNET_IDS --scheme $LB_SCHEME --type network \
+  --security-groups $SECURITY_GROUP_ID \
+  --region $REGION \
+  --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+
+echo "Created Internal Network Load Balancer: $LB_ARN"
+
+# Step 4: Create a Listener
+aws elbv2 create-listener --load-balancer-arn $LB_ARN \
+  --protocol $TG_PROTOCOL --port $LISTENER_PORT \
+  --region $REGION \
+  --default-actions Type=forward,TargetGroupArn=$TG_ARN
+
+echo "Created Listener on port $LISTENER_PORT"
+
+echo "Internal Network Load Balancer setup completed!"

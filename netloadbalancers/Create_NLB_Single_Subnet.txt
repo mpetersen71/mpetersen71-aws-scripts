@@ -1,0 +1,45 @@
+#!/bin/bash
+# Creates a Network Load Balancer within a single subnet - untested
+
+# Variables (Modify as needed)
+VPC_ID="vpc-xxxxxxxx"
+SUBNET_ID="subnet-xxxxxxxx"  # Single subnet
+SECURITY_GROUP_ID="sg-xxxxxxxx"  # Not required for NLB, but useful for tracking
+TG_NAME="my-single-subnet-nlb-tg"
+TG_PORT=80
+TG_PROTOCOL="TCP"  # Use TCP or UDP for NLB
+LB_NAME="my-single-subnet-nlb"
+LB_SCHEME="internal"  # "internet-facing" or "internal"
+LISTENER_PORT=80
+INSTANCE_IDS=("i-xxxxxxxxxx")  # Replace with your EC2 instance ID(s)
+
+# Step 1: Create a Target Group
+TG_ARN=$(aws elbv2 create-target-group --name $TG_NAME \
+  --protocol $TG_PROTOCOL --port $TG_PORT \
+  --vpc-id $VPC_ID --target-type instance \
+  --query 'TargetGroups[0].TargetGroupArn' --output text)
+
+echo "Created Target Group: $TG_ARN"
+
+# Step 2: Register Targets (EC2 instances) to the Target Group
+for INSTANCE in "${INSTANCE_IDS[@]}"; do
+  aws elbv2 register-targets --target-group-arn $TG_ARN \
+    --targets Id=$INSTANCE
+  echo "Registered instance $INSTANCE to Target Group"
+done
+
+# Step 3: Create a Network Load Balancer in a Single Subnet
+LB_ARN=$(aws elbv2 create-load-balancer --name $LB_NAME \
+  --subnets $SUBNET_ID --scheme $LB_SCHEME --type network \
+  --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+
+echo "Created Network Load Balancer in a single subnet: $LB_ARN"
+
+# Step 4: Create a Listener
+aws elbv2 create-listener --load-balancer-arn $LB_ARN \
+  --protocol $TG_PROTOCOL --port $LISTENER_PORT \
+  --default-actions Type=forward,TargetGroupArn=$TG_ARN
+
+echo "Created Listener on port $LISTENER_PORT"
+
+echo "Single-subnet Network Load Balancer setup completed!"
